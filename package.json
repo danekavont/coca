@@ -48,7 +48,8 @@
     "expo-image-picker": "~16.0.6",
     "expo-file-system": "~18.0.12",
     "expo-media-library": "~17.0.6",
-    "expo-dev-client": "~5.0.20"
+    "expo-dev-client": "~5.0.20",
+    "@react-native-picker/picker": "2.9.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
