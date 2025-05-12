@@ -1,27 +1,28 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  TextInput,
-  Button,
-  StyleSheet,
-  FlatList,
-  Image,
-  Alert,
-  TouchableOpacity,
-  Modal,
-  Pressable,
+  View, Text, TextInput, Button, StyleSheet, FlatList,
+  Image, Alert, TouchableOpacity, Modal, Pressable, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as MediaLibrary from 'expo-media-library';
+import NetInfo from '@react-native-community/netinfo';
+import {
+  collection, addDoc, updateDoc, doc, onSnapshot, getDocs
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../lib/firebase'; // adjust the path if needed
 
 type ImageData = {
-  uri: string;
+  uri: string; // local or remote
   uploadedAt: string;
+  storagePath?: string;
+  downloadURL?: string;
+  pendingUpload?: boolean;
 };
 
 type Folder = {
+  id: string;
   name: string;
   images: ImageData[];
 };
@@ -31,25 +32,52 @@ export default function RecordsScreen() {
   const [newFolderName, setNewFolderName] = useState('');
   const [showFolderInput, setShowFolderInput] = useState(false);
   const [selectedFolderIndex, setSelectedFolderIndex] = useState<number | null>(null);
-  const [renamingIndex, setRenamingIndex] = useState<number | null>(null);
-  const [renameText, setRenameText] = useState('');
   const [previewImage, setPreviewImage] = useState<ImageData | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleCreateFolder = () => {
+  // 🔌 Upload pending images when online
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (state.isConnected) {
+        uploadPendingImages();
+      }
+    });
+    loadFolders(); // Firestore listener
+    return unsubscribe;
+  }, []);
+
+  const loadFolders = () => {
+    const q = collection(db, 'folders');
+    onSnapshot(q, async (snapshot) => {
+      const folderData: Folder[] = [];
+      for (const docSnap of snapshot.docs) {
+        const folderId = docSnap.id;
+        const folder = docSnap.data();
+        const imagesSnap = await getDocs(collection(db, 'folders', folderId, 'images'));
+        const images: ImageData[] = [];
+        imagesSnap.forEach(imgDoc => {
+          images.push(imgDoc.data() as ImageData);
+        });
+        folderData.push({ id: folderId, name: folder.name, images });
+      }
+      setFolders(folderData);
+    });
+  };
+
+  const handleCreateFolder = async () => {
     if (!newFolderName.trim()) {
       Alert.alert('Please enter a folder name');
       return;
     }
 
-    if (folders.find(f => f.name === newFolderName.trim())) {
-      Alert.alert('Folder already exists');
-      return;
-    }
+    await addDoc(collection(db, 'folders'), {
+      name: newFolderName.trim(),
+    });
 
-    setFolders([...folders, { name: newFolderName.trim(), images: [] }]);
     setNewFolderName('');
     setShowFolderInput(false);
+    Alert.alert('Folder Created', 'Your folder has been created.');
   };
 
   const handlePickImage = async () => {
@@ -65,64 +93,71 @@ export default function RecordsScreen() {
     });
 
     if (!result.canceled && result.assets.length > 0) {
+      const folder = folders[selectedFolderIndex];
       const imageUri = result.assets[0].uri;
-      const updated = [...folders];
-      updated[selectedFolderIndex].images.push({
+
+      const metadata: ImageData = {
         uri: imageUri,
         uploadedAt: new Date().toISOString(),
-      });
-      setFolders(updated);
+        pendingUpload: true,
+      };
+
+      await addDoc(collection(db, 'folders', folder.id, 'images'), metadata);
+      Alert.alert('Image Added', 'Image metadata saved offline. Will upload when online.');
     }
   };
 
-  const handleDeleteFolder = (index: number) => {
-    Alert.alert(
-      'Delete Folder',
-      `Delete "${folders[index].name}" and all its images?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            const updated = folders.filter((_, i) => i !== index);
-            setFolders(updated);
-            if (selectedFolderIndex === index) {
-              setSelectedFolderIndex(null);
-            }
-          },
-        },
-      ]
-    );
-  };
+  const uploadPendingImages = async () => {
+    for (const folder of folders) {
+      for (const [i, img] of folder.images.entries()) {
+        if (img.pendingUpload) {
+          try {
+            const response = await fetch(img.uri);
+            const blob = await response.blob();
+            const path = `records/${folder.id}/${Date.now()}-${i}.jpg`;
+            const storageRef = ref(storage, path);
+            await uploadBytes(storageRef, blob);
+            const url = await getDownloadURL(storageRef);
 
-  const handleDeleteImage = () => {
-    if (selectedFolderIndex === null || previewIndex === null) return;
-    const updated = [...folders];
-    updated[selectedFolderIndex].images.splice(previewIndex, 1);
-    setFolders(updated);
-    setPreviewImage(null);
-    setPreviewIndex(null);
+            const imageDocs = await getDocs(collection(db, 'folders', folder.id, 'images'));
+            const docRef = imageDocs.docs[i].ref;
+
+            await updateDoc(docRef, {
+              storagePath: path,
+              downloadURL: url,
+              pendingUpload: false,
+            });
+
+            console.log(`✅ Uploaded image: ${url}`);
+          } catch (err) {
+            console.error(`❌ Failed to upload image: ${img.uri}`, err);
+          }
+        }
+      }
+    }
   };
 
   const handleDownloadImage = async () => {
-    if (!previewImage) return;
-
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission required', 'Enable media access to download images.');
+    if (!previewImage?.downloadURL) {
+      Alert.alert('Unavailable', 'This image is not uploaded yet.');
       return;
     }
 
-    const filename = previewImage.uri.split('/').pop() || `record-${Date.now()}.jpg`;
-    const fileUri = FileSystem.documentDirectory + filename;
+    setIsProcessing(true);
+    try {
+      const filename = previewImage.downloadURL.split('/').pop()?.split('?')[0] || `record.jpg`;
+      const fileUri = FileSystem.documentDirectory + filename;
+      const downloadResumable = FileSystem.createDownloadResumable(previewImage.downloadURL, fileUri);
+      await downloadResumable.downloadAsync();
 
-    await FileSystem.downloadAsync(previewImage.uri, fileUri);
-    const asset = await MediaLibrary.createAssetAsync(fileUri);
-    await MediaLibrary.createAlbumAsync('CoCa Records', asset, false);
-
-    // ✅ Alert after successful download
-    Alert.alert('Download complete', 'Image saved to gallery.');
+      const asset = await MediaLibrary.createAssetAsync(fileUri);
+      await MediaLibrary.createAlbumAsync('CoCa Records', asset, false);
+      Alert.alert('Download complete', 'Image saved to gallery.');
+    } catch (e) {
+      console.error('Download failed:', e);
+      Alert.alert('Error', 'Could not download image.');
+    }
+    setIsProcessing(false);
   };
 
   return (
@@ -143,76 +178,34 @@ export default function RecordsScreen() {
         </View>
       )}
 
-      <View style={{ height: 16 }} />
-
       <FlatList
         data={folders}
-        keyExtractor={(item) => item.name}
+        keyExtractor={(item) => item.id}
         renderItem={({ item, index }) => (
           <View style={styles.folder}>
-            <View style={styles.folderHeader}>
-              <TouchableOpacity
-                onPress={() =>
-                  setSelectedFolderIndex(index === selectedFolderIndex ? null : index)
-                }
-              >
-                <Text
-                  style={[
-                    styles.folderName,
-                    index === selectedFolderIndex && styles.selectedFolderName,
-                  ]}
-                >
-                  📁 {item.name}
-                </Text>
-              </TouchableOpacity>
-
-              {index === selectedFolderIndex && renamingIndex !== index && (
-                <View style={styles.folderActions}>
-                  <Button
-                    title="Edit"
-                    onPress={() => {
-                      setRenameText(item.name);
-                      setRenamingIndex(index);
-                    }}
-                  />
-                  <Button title="Delete" onPress={() => handleDeleteFolder(index)} />
-                </View>
-              )}
-            </View>
-
-            {index === renamingIndex && (
-              <View style={styles.renameForm}>
-                <TextInput
-                  style={styles.input}
-                  value={renameText}
-                  onChangeText={setRenameText}
-                />
-                <Button
-                  title="Save"
-                  onPress={() => {
-                    const updated = [...folders];
-                    updated[index].name = renameText.trim();
-                    setFolders(updated);
-                    setRenamingIndex(null);
-                    setRenameText('');
-                  }}
-                />
-                <Button title="Cancel" onPress={() => setRenamingIndex(null)} />
-              </View>
-            )}
+            <TouchableOpacity
+              onPress={() => setSelectedFolderIndex(index === selectedFolderIndex ? null : index)}
+            >
+              <Text style={[
+                styles.folderName,
+                index === selectedFolderIndex && styles.selectedFolderName,
+              ]}>
+                📁 {item.name}
+              </Text>
+            </TouchableOpacity>
 
             {index === selectedFolderIndex && (
               <View style={styles.imageGrid}>
                 {item.images.length > 0 ? (
-                  item.images.map((img, idx) => (
+                  item.images.map((img, i) => (
                     <TouchableOpacity
-                      key={idx}
+                      key={i}
                       onPress={() => {
                         setPreviewImage(img);
-                        setPreviewIndex(idx);
+                        setPreviewIndex(i);
                       }}
                     >
-                      <Image source={{ uri: img.uri }} style={styles.image} />
+                      <Image source={{ uri: img.downloadURL || img.uri }} style={styles.image} />
                     </TouchableOpacity>
                   ))
                 ) : (
@@ -227,19 +220,21 @@ export default function RecordsScreen() {
         )}
       />
 
-      {/* Modal for image preview */}
+      {/* Modal for preview */}
       <Modal visible={!!previewImage} transparent animationType="fade">
         <Pressable style={styles.modalOverlay} onPress={() => setPreviewImage(null)}>
           <View style={styles.modalContent}>
             {previewImage && (
               <>
-                <Image source={{ uri: previewImage.uri }} style={styles.modalImage} />
+                <Image source={{ uri: previewImage.downloadURL || previewImage.uri }} style={styles.modalImage} />
                 <Text style={styles.modalText}>
                   Uploaded: {new Date(previewImage.uploadedAt).toLocaleString()}
                 </Text>
-                <Button title="Download Image" onPress={handleDownloadImage} />
-                <View style={{ height: 8 }} />
-                <Button title="Delete Image" onPress={handleDeleteImage} color="#ff3b30" />
+                {isProcessing ? (
+                  <ActivityIndicator color="#007AFF" />
+                ) : (
+                  <Button title="Download Image" onPress={handleDownloadImage} />
+                )}
               </>
             )}
           </View>
@@ -252,70 +247,33 @@ export default function RecordsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
   heading: { fontSize: 20, fontWeight: '600', marginBottom: 10 },
-  folderForm: { marginBottom: 12, gap: 6 },
-  renameForm: { gap: 6, marginTop: 6 },
+  folderForm: { marginBottom: 12 },
   input: {
-    borderWidth: 1, borderColor: '#ccc', padding: 10, borderRadius: 6,
+    borderWidth: 1, borderColor: '#ccc', padding: 10, borderRadius: 6, marginBottom: 6,
   },
-  folder: {
-    marginBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-    paddingBottom: 12,
-  },
-  folderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  folderActions: { flexDirection: 'row', gap: 8 },
-  folderName: { fontSize: 16, marginBottom: 6 },
+  folder: { marginBottom: 16 },
+  folderName: { fontSize: 16 },
   selectedFolderName: { fontWeight: 'bold', color: '#007AFF' },
   imageGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 8,
-    alignItems: 'center',
+    flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8,
   },
   image: {
-    width: 80,
-    height: 80,
-    borderRadius: 8,
+    width: 80, height: 80, borderRadius: 8,
   },
-  noImages: {
-    color: '#666',
-    marginBottom: 6,
-  },
+  noImages: { color: '#666' },
   addButton: {
-    fontSize: 30,
-    fontWeight: '600',
-    color: '#007AFF',
-    paddingHorizontal: 12,
+    fontSize: 30, color: '#007AFF', paddingHorizontal: 10,
   },
   modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center',
   },
   modalContent: {
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 12,
-    maxWidth: '90%',
+    backgroundColor: '#fff', padding: 20, borderRadius: 12, maxWidth: '90%', alignItems: 'center',
   },
   modalImage: {
-    width: 250,
-    height: 250,
-    resizeMode: 'contain',
-    marginBottom: 10,
-    borderRadius: 8,
+    width: 250, height: 250, resizeMode: 'contain', marginBottom: 10, borderRadius: 8,
   },
   modalText: {
-    fontSize: 14,
-    marginBottom: 10,
-    color: '#555',
+    fontSize: 14, marginBottom: 10, color: '#555',
   },
 });

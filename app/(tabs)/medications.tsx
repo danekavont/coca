@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, Button, StyleSheet, FlatList,
-  TouchableOpacity, Alert
+  TouchableOpacity, Alert, ActivityIndicator
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import * as Notifications from 'expo-notifications';
+import { db } from '../lib/firebase';
+import {
+  collection, addDoc, getDocs, updateDoc, deleteDoc, doc
+} from 'firebase/firestore';
 
 const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const OFFSETS = [0, 5, 10, 30];
@@ -17,6 +21,7 @@ type TimeReminder = {
 };
 
 type Medication = {
+  id?: string;
   name: string;
   days: boolean[];
   reminders: TimeReminder[];
@@ -33,12 +38,27 @@ export default function MedicationsScreen() {
   const [newMinute, setNewMinute] = useState(0);
   const [newPeriod, setNewPeriod] = useState<'AM' | 'PM'>('AM');
   const [newOffset, setNewOffset] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   const todayIndex = new Date().getDay();
 
   useEffect(() => {
     Notifications.requestPermissionsAsync();
+    loadMeds();
   }, []);
+
+  const loadMeds = async () => {
+    try {
+      const snapshot = await getDocs(collection(db, 'medications'));
+      const meds: Medication[] = [];
+      snapshot.forEach(docSnap => {
+        meds.push({ id: docSnap.id, ...(docSnap.data() as Medication) });
+      });
+      setMedications(meds);
+    } catch (error) {
+      console.error('Failed to load medications:', error);
+    }
+  };
 
   const toggleDay = (index: number) => {
     const updated = [...selectedDays];
@@ -47,6 +67,18 @@ export default function MedicationsScreen() {
   };
 
   const addReminder = () => {
+    const exists = reminders.some(r =>
+      r.hour === newHour &&
+      r.minute === newMinute &&
+      r.period === newPeriod &&
+      r.offset === newOffset
+    );
+
+    if (exists) {
+      Alert.alert('Duplicate', 'This reminder already exists.');
+      return;
+    }
+
     setReminders([
       ...reminders,
       { hour: newHour, minute: newMinute, period: newPeriod, offset: newOffset },
@@ -64,11 +96,15 @@ export default function MedicationsScreen() {
     return `${h}:${m} ${r.period}`;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    console.log('Attempting to save medication with:', { medicineName, selectedDays, reminders });
+
     if (!medicineName.trim() || reminders.length === 0 || !selectedDays.includes(true)) {
-      Alert.alert('Incomplete', 'Please complete all fields.');
+      Alert.alert('Incomplete', 'Please complete all fields (name, days, and at least one reminder).');
       return;
     }
+
+    setSaving(true);
 
     const med: Medication = {
       name: medicineName.trim(),
@@ -76,16 +112,29 @@ export default function MedicationsScreen() {
       reminders: [...reminders],
     };
 
-    const updated = [...medications];
-    if (editingIndex !== null) {
-      updated[editingIndex] = med;
-    } else {
-      updated.push(med);
-    }
+    try {
+      const updated = [...medications];
+      if (editingIndex !== null && medications[editingIndex]?.id) {
+        const id = medications[editingIndex].id!;
+        await updateDoc(doc(db, 'medications', id), med);
+        updated[editingIndex] = { ...med, id };
+        console.log('Medication updated:', id);
+      } else {
+        const docRef = await addDoc(collection(db, 'medications'), med);
+        updated.push({ ...med, id: docRef.id });
+        console.log('Medication added:', docRef.id);
+      }
 
-    setMedications(updated);
-    scheduleMedNotifications(med);
-    resetForm();
+      setMedications(updated);
+      await scheduleMedNotifications(med);
+      resetForm();
+      Alert.alert('Success', 'Medication saved successfully.');
+    } catch (error) {
+      console.error('Error saving medication:', error);
+      Alert.alert('Error', 'An error occurred while saving the medication.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const resetForm = () => {
@@ -105,19 +154,18 @@ export default function MedicationsScreen() {
     setShowForm(true);
   };
 
-  const handleDelete = (index: number) => {
-    Alert.alert('Delete Medication', 'Are you sure?', [
-      { text: 'Cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => {
-          const updated = [...medications];
-          updated.splice(index, 1);
-          setMedications(updated);
-        },
-      },
-    ]);
+  const handleDelete = async (index: number) => {
+    try {
+      if (medications[index]?.id) {
+        await deleteDoc(doc(db, 'medications', medications[index].id!));
+      }
+      const updated = [...medications];
+      updated.splice(index, 1);
+      setMedications(updated);
+    } catch (error) {
+      console.error('Failed to delete medication:', error);
+      Alert.alert('Error', 'Unable to delete medication.');
+    }
   };
 
   const scheduleMedNotifications = async (med: Medication) => {
@@ -146,9 +194,9 @@ export default function MedicationsScreen() {
                 sound: true,
               },
               trigger: {
-                seconds: delaySeconds,
-                repeats: false,
-              },
+                type: 'date',
+                date: triggerDate,
+              } as Notifications.DateTriggerInput,
             });
           }
         }
@@ -157,22 +205,6 @@ export default function MedicationsScreen() {
   };
 
   const medsForToday = medications.filter(m => m.days[todayIndex]);
-
-  const upcomingMeds = medications.flatMap((med) =>
-    med.days
-      .map((active, dayIndex) => {
-        if (!active) return null;
-        const date = new Date();
-        const delta = (dayIndex - todayIndex + 7) % 7;
-        date.setDate(date.getDate() + delta);
-        return {
-          name: med.name,
-          date,
-          reminders: med.reminders,
-        };
-      })
-      .filter((item): item is { name: string; date: Date; reminders: TimeReminder[] } => item !== null)
-  );
 
   return (
     <View style={styles.container}>
@@ -203,23 +235,6 @@ export default function MedicationsScreen() {
               )}
             />
           )}
-
-          <Text style={styles.heading}>Upcoming Medications</Text>
-          <FlatList
-            data={upcomingMeds}
-            keyExtractor={(item, index) => `${item.name}-${index}-${item.date.toISOString()}`}
-            renderItem={({ item }) => (
-              <View style={styles.medItem}>
-                <Text style={styles.medName}>{item.name}</Text>
-                <Text>{item.date.toDateString()}</Text>
-                {item.reminders.map((r, i) => (
-                  <Text key={i} style={styles.timeText}>
-                    {formatTime(r)} — {r.offset === 0 ? 'At time' : `${r.offset} mins before`}
-                  </Text>
-                ))}
-              </View>
-            )}
-          />
         </>
       ) : (
         <>
@@ -279,7 +294,10 @@ export default function MedicationsScreen() {
 
           <Button title="Add Reminder" onPress={addReminder} />
           <View style={{ marginTop: 16 }}>
-            <Button title="Save Medication" onPress={handleSave} />
+            <Button title="Save Medication" onPress={handleSave} disabled={saving} />
+            {saving && (
+              <Text style={{ marginTop: 8, color: '#007AFF', textAlign: 'center' }}>Saving...</Text>
+            )}
           </View>
         </>
       )}
