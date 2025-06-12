@@ -106,7 +106,30 @@ export default function AppointmentsScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.mainTitle}>Appointments</Text>
+{!showForm ? (
+        <Button title="Add Appointment" onPress={() => setShowForm(true)} />
+      ) : (
+        <View style={styles.form}>
+          <TextInput
+            style={styles.input}
+            placeholder="Appointment Title"
+            value={title}
+            onChangeText={setTitle}
+          />
 
+          <Button title="Select Time" onPress={() => setShowTimePicker(true)} />
+
+          {showTimePicker && (
+            <DateTimePicker
+              value={time}
+              mode="time"
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              onChange={(_, selectedTime) => {
+                setShowTimePicker(false);
+                if (selectedTime) setTime(selectedTime);
+              }}
+            />
+          )}
       <Calendar
         onDayPress={(day: DateData) => setSelectedDate(day.dateString)}
         markedDates={getMarkedDates()}
@@ -147,30 +170,7 @@ export default function AppointmentsScreen() {
         <Text style={{ color: '#999', marginTop: 12 }}>Select a date to see appointments.</Text>
       )}
 
-      {!showForm ? (
-        <Button title="Add Appointment" onPress={() => setShowForm(true)} />
-      ) : (
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Appointment Title"
-            value={title}
-            onChangeText={setTitle}
-          />
-
-          <Button title="Select Time" onPress={() => setShowTimePicker(true)} />
-
-          {showTimePicker && (
-            <DateTimePicker
-              value={time}
-              mode="time"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_, selectedTime) => {
-                setShowTimePicker(false);
-                if (selectedTime) setTime(selectedTime);
-              }}
-            />
-          )}
+      
 
           <Text style={styles.preview}>
             {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

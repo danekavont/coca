@@ -162,7 +162,7 @@ export default function RecordsScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.heading}>Medical Records</Text>
+      <Text style={styles.mainTitle}>Medical Records</Text>
 
       {!showFolderInput ? (
         <Button title="Create Folder" onPress={() => setShowFolderInput(true)} />
@@ -275,5 +275,12 @@ const styles = StyleSheet.create({
   },
   modalText: {
     fontSize: 14, marginBottom: 10, color: '#555',
+  },
+  mainTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 12,
+    // color: '#007AFF',
   },
 });
