@@ -20,7 +20,7 @@ export default function Register() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.header}>Register</Text>
+      <Text style={styles.mainTitle}>Register</Text>
       <TextInput style={styles.input} placeholder="Email" onChangeText={setEmail} />
       <TextInput style={styles.input} placeholder="Password" onChangeText={setPassword} secureTextEntry />
       <Button title="Register" onPress={handleRegister} />
@@ -30,7 +30,13 @@ export default function Register() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: "center", padding: 16 },
-  header: { fontSize: 24, marginBottom: 16 },
-  input: { borderWidth: 1, padding: 8, marginBottom: 12, borderRadius: 4 },
+  container: { flex: 1, justifyContent: "center", padding: 16, gap: 12 },
+  input: { borderWidth: 1, padding: 10, marginBottom: 12, borderRadius: 4 },
+  mainTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 12,
+    // color: '#007AFF',
+  },
 });
