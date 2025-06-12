@@ -6,15 +6,22 @@ import {
   Button,
   StyleSheet,
   Alert,
-  Platform,
   FlatList,
 } from 'react-native';
 import { Calendar, DateData } from 'react-native-calendars';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import * as Notifications from 'expo-notifications';
-import type { DateTriggerInput } from 'expo-notifications';
+import { Picker } from '@react-native-picker/picker';
+import { db, storage } from '../lib/firebase'; // adjust the path if needed
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  doc,
+  onSnapshot,
+  Timestamp,
+} from 'firebase/firestore';
 
 type Appointment = {
+  id?: string;
   date: string;
   time: Date;
   title: string;
@@ -25,70 +32,68 @@ export default function AppointmentsScreen() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState('');
-  const [time, setTime] = useState(new Date());
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [hour, setHour] = useState('09');
+  const [minute, setMinute] = useState('00');
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
-  // Request permissions
   useEffect(() => {
-    Notifications.requestPermissionsAsync().then(({ status }) => {
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Notifications are disabled.');
-      }
+    const unsubscribe = onSnapshot(collection(db, 'appointments'), (snapshot) => {
+      const appts = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          title: data.title,
+          date: data.date,
+          time: data.time.toDate(),
+        };
+      });
+      setAppointments(appts);
     });
+
+    return () => unsubscribe();
   }, []);
 
-  // Add or update appointment
   const handleAddAppointment = async () => {
     if (!selectedDate || !title) {
       Alert.alert('Missing Info', 'Please provide title and select date/time.');
       return;
     }
 
-    const scheduledDateTime = new Date(
-      `${selectedDate}T${time.toTimeString().slice(0, 5)}`
-    );
+    const timeString = `${hour}:${minute}`;
+    const scheduledDateTime = new Date(`${selectedDate}T${timeString}`);
 
-    const trigger = {
-      type: 'date',
-      date: scheduledDateTime,
-    } as DateTriggerInput;
+    const newAppointment = {
+      title,
+      date: selectedDate,
+      time: Timestamp.fromDate(scheduledDateTime),
+    };
 
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: `Appointment: ${title}`,
-        body: `Scheduled on ${selectedDate} at ${time.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        })}`,
-      },
-      trigger,
-    });
+    try {
+      if (editingIndex !== null && appointments[editingIndex]?.id) {
+        const id = appointments[editingIndex].id!;
+        await updateDoc(doc(db, 'appointments', id), newAppointment);
+        setEditingIndex(null);
+      } else {
+        await addDoc(collection(db, 'appointments'), newAppointment);
+      }
 
-    if (editingIndex !== null) {
-      const updated = [...appointments];
-      updated[editingIndex] = { title, date: selectedDate, time };
-      setAppointments(updated);
-      setEditingIndex(null);
-    } else {
-      setAppointments((prev) => [...prev, { date: selectedDate, time, title }]);
+      setTitle('');
+      setShowForm(false);
+      setSelectedDate('');
+      Alert.alert('Success', 'Appointment saved!');
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Something went wrong saving to Firebase.');
     }
-
-    setTitle('');
-    setShowForm(false);
-    Alert.alert('Success', 'Appointment saved!');
   };
 
   const filteredAppointments = appointments.filter((a) => a.date === selectedDate);
 
   const getMarkedDates = () => {
     const marks: Record<string, any> = {};
-
     appointments.forEach((appt) => {
       if (!marks[appt.date]) {
-        marks[appt.date] = {
-          dots: [{ color: '#007AFF' }],
-        };
+        marks[appt.date] = { dots: [{ color: '#007AFF' }] };
       }
     });
 
@@ -103,35 +108,21 @@ export default function AppointmentsScreen() {
     return marks;
   };
 
+  const generatePickerItems = (max: number) =>
+    Array.from({ length: max }, (_, i) => {
+      const val = i.toString().padStart(2, '0');
+      return <Picker.Item key={val} label={val} value={val} />;
+    });
+
   return (
     <View style={styles.container}>
       <Text style={styles.mainTitle}>Appointments</Text>
-{!showForm ? (
-        <Button title="Add Appointment" onPress={() => setShowForm(true)} />
-      ) : (
-        <View style={styles.form}>
-          <TextInput
-            style={styles.input}
-            placeholder="Appointment Title"
-            value={title}
-            onChangeText={setTitle}
-          />
 
-          <Button title="Select Time" onPress={() => setShowTimePicker(true)} />
-
-          {showTimePicker && (
-            <DateTimePicker
-              value={time}
-              mode="time"
-              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-              onChange={(_, selectedTime) => {
-                setShowTimePicker(false);
-                if (selectedTime) setTime(selectedTime);
-              }}
-            />
-          )}
       <Calendar
-        onDayPress={(day: DateData) => setSelectedDate(day.dateString)}
+        onDayPress={(day: DateData) => {
+          setSelectedDate(day.dateString);
+          setShowForm(false);
+        }}
         markedDates={getMarkedDates()}
         markingType="multi-dot"
       />
@@ -142,22 +133,20 @@ export default function AppointmentsScreen() {
           {filteredAppointments.length > 0 ? (
             <FlatList
               data={filteredAppointments}
-              keyExtractor={(item, index) => `${item.title}-${index}`}
+              keyExtractor={(item) => item.id || `${item.title}-${item.time}`}
               renderItem={({ item, index }) => (
                 <View style={styles.appointmentItem}>
                   <Text
                     style={styles.appointmentText}
                     onPress={() => {
                       setTitle(item.title);
-                      setTime(item.time);
+                      setHour(item.time.getHours().toString().padStart(2, '0'));
+                      setMinute(item.time.getMinutes().toString().padStart(2, '0'));
                       setShowForm(true);
                       setEditingIndex(index);
                     }}
                   >
-                    {item.title} — {item.time.toLocaleTimeString([], {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
+                    {item.title} — {item.time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </Text>
                 </View>
               )}
@@ -165,16 +154,45 @@ export default function AppointmentsScreen() {
           ) : (
             <Text style={{ marginBottom: 12, color: '#777' }}>No appointments yet.</Text>
           )}
+          {!showForm && <Button title="Add Appointment" onPress={() => setShowForm(true)} />}
         </>
       ) : (
         <Text style={{ color: '#999', marginTop: 12 }}>Select a date to see appointments.</Text>
       )}
 
-      
+      {showForm && (
+        <View style={styles.form}>
+          <TextInput
+            style={styles.input}
+            placeholder="Appointment Title"
+            value={title}
+            onChangeText={setTitle}
+          />
 
-          <Text style={styles.preview}>
-            {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </Text>
+          <Text style={{ marginTop: 10 }}>Select Time:</Text>
+          <View style={styles.pickerRow}>
+            <Picker
+              selectedValue={hour}
+              style={styles.picker}
+              onValueChange={(val) => setHour(val)}
+              itemStyle={{ fontSize: 20 }}
+              mode="dropdown"
+            >
+              {generatePickerItems(24)}
+            </Picker>
+
+            <Text style={styles.colon}>:</Text>
+
+            <Picker
+              selectedValue={minute}
+              style={styles.picker}
+              onValueChange={(val) => setMinute(val)}
+              itemStyle={{ fontSize: 20 }}
+              mode="dropdown"
+            >
+              {generatePickerItems(60)}
+            </Picker>
+          </View>
 
           <Button
             title={editingIndex !== null ? 'Update Appointment' : 'Save Appointment'}
@@ -197,7 +215,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 12,
-    // color: '#007AFF',
   },
   sectionTitle: {
     fontSize: 16,
@@ -220,13 +237,20 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     marginTop: 10,
   },
-  preview: {
-    marginVertical: 8,
-    fontSize: 16,
-    color: '#333',
-  },
   form: {
     marginTop: 10,
     gap: 8,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  picker: {
+    flex: 1,
+    height: 50,
+  },
+  colon: {
+    fontSize: 20,
+    marginHorizontal: 8,
   },
 });
