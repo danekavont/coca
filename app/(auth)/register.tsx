@@ -1,30 +1,60 @@
 import { useState } from "react";
-import { View, Text, TextInput, Button, Alert, StyleSheet } from "react-native";
+import { View, Text, TextInput, Button, Alert, StyleSheet, ActivityIndicator } from "react-native";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../lib/firebase";
+import { auth, db } from "../lib/firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { router } from "expo-router";
 
 export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
+    if (!email || !password) {
+      Alert.alert("Error", "Please enter email and password.");
+      return;
+    }
+    setLoading(true);
     try {
-      await createUserWithEmailAndPassword(auth, email, password);
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      await setDoc(doc(db, "users", userCredential.user.uid), {
+        email: userCredential.user.email,
+        createdAt: serverTimestamp(),
+      });
       Alert.alert("Success", "Account created!");
       router.replace("/login");
     } catch (err: any) {
       Alert.alert("Error", err.message);
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
     <View style={styles.container}>
       <Text style={styles.mainTitle}>Register</Text>
-      <TextInput style={styles.input} placeholder="Email" onChangeText={setEmail} />
-      <TextInput style={styles.input} placeholder="Password" onChangeText={setPassword} secureTextEntry />
-      <Button title="Register" onPress={handleRegister} />
-      <Button title="Back to Login" onPress={() => router.back()} />
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        onChangeText={setPassword}
+        secureTextEntry
+      />
+      {loading ? (
+        <ActivityIndicator size="large" />
+      ) : (
+        <>
+          <Button title="Register" onPress={handleRegister} />
+          <Button title="Back to Login" onPress={() => router.replace("/login")} />
+        </>
+      )}
     </View>
   );
 }
@@ -37,6 +67,5 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 12,
-    // color: '#007AFF',
   },
 });
