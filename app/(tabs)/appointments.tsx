@@ -105,6 +105,8 @@ export default function AppointmentsScreen() {
 
   return (
     <View style={styles.container}>
+      <Text style={styles.mainTitle}>Appointments</Text>
+
       <Calendar
         onDayPress={(day: DateData) => setSelectedDate(day.dateString)}
         markedDates={getMarkedDates()}
@@ -189,6 +191,13 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
     gap: 12,
+  },
+  mainTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 12,
+    // color: '#007AFF',
   },
   sectionTitle: {
     fontSize: 16,
