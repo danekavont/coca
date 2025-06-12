@@ -40,11 +40,11 @@ export default function HomeScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.scrollContainer}>
+      <Button title="Logout" onPress={handleLogout} />
       <ThemedView style={[styles.section, { backgroundColor: '#f5f5f5'}]}>
-        <ThemedText type="title">
-          {user ? `Welcome to CoCa, ${user.email}` : "Welcome to CoCa"}
+        <ThemedText type="title" style={styles.mainTitle}>
+          {user ? `Good day, ${user.email}` : "Welcome to CoCa"}
         </ThemedText>
-        <Button title="Logout" onPress={handleLogout} />
       </ThemedView>
     </ScrollView>
   );
@@ -63,5 +63,11 @@ const styles = StyleSheet.create({
   section: {
     gap: 6,
     backgroundColor: '#000',
+  },
+    mainTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: 12,
   },
 });
