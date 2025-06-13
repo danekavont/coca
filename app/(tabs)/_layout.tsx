@@ -133,7 +133,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="medications"
           options={{
-            title: 'Medications',
+            title: '',
             tabBarIcon: ({ color }) => (
               <IconSymbol size={28} name="pills.fill" color={color} />
             ),
@@ -142,7 +142,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="appointments"
           options={{
-            title: 'Appointments',
+            title: '',
             tabBarIcon: ({ color }) => (
               <IconSymbol size={28} name="calendar" color={color} />
             ),
@@ -151,7 +151,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="index"
           options={{
-            title: 'Home',
+            title: '',
             tabBarIcon: ({ color }) => (
               <IconSymbol size={28} name="house.fill" color={color} />
             ),
@@ -160,7 +160,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="records"
           options={{
-            title: 'Records',
+            title: '',
             tabBarIcon: ({ color }) => (
               <IconSymbol size={28} name="doc.text.fill" color={color} />
             ),
@@ -169,7 +169,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="resources"
           options={{
-            title: 'Explore',
+            title: '',
             tabBarIcon: ({ color }) => (
               <IconSymbol size={28} name="book.fill" color={color} />
             ),
