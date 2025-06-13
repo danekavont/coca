@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 
-const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 type Medication = {
   name: string;
