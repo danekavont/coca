@@ -37,6 +37,7 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(true);
   const [medications, setMedications] = useState<Medication[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [todaysAppointments, setTodaysAppointments] = useState<Appointment[]>([]);
 
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
@@ -75,12 +76,13 @@ export default function HomeScreen() {
     });
 
     const unsubAppts = onSnapshot(apptsRef, (snapshot) => {
-      setAppointments(
-        snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        })) as Appointment[]
-      );
+      const all = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Appointment[];
+
+      setTodaysAppointments(all.filter((a) => a.date === today));
+      setAppointments(all.filter((a) => a.date > today));
     });
 
     return () => {
@@ -116,6 +118,30 @@ export default function HomeScreen() {
                   <ThemedText style={styles.medName}>{med.name}</ThemedText>
                   <ThemedText>
                     {timeString} ({med.dosage})
+                  </ThemedText>
+                </View>
+              );
+            })
+          )}
+        </View>
+
+        <View style={styles.rectCard}>
+          <ThemedText type="subtitle">Today's Appointments</ThemedText>
+          {todaysAppointments.length === 0 ? (
+            <ThemedText>No appointments today.</ThemedText>
+          ) : (
+            todaysAppointments.map((appt) => {
+              const time = appt.time.toDate();
+              return (
+                <View key={appt.id} style={styles.itemRow}>
+                  <ThemedText style={styles.apptTitle}>{appt.title}</ThemedText>
+                  <ThemedText>
+                    {appt.date} at{" "}
+                    {time.toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    {appt.location ? ` @ ${appt.location}` : ""}
                   </ThemedText>
                 </View>
               );

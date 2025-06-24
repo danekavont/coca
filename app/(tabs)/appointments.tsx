@@ -42,18 +42,39 @@ export default function AppointmentsScreen() {
   const [frequency, setFrequency] = useState('');
   const [repeatFrom, setRepeatFrom] = useState('');
   const [repeatTo, setRepeatTo] = useState('');
-  const [hour, setHour] = useState('09');
-  const [minute, setMinute] = useState('00');
-  const [period, setPeriod] = useState<'AM' | 'PM'>('AM');
+  const [selectedDays, setSelectedDays] = useState<string[]>([]);
+  const [times, setTimes] = useState([{ hour: '09', minute: '00', period: 'AM' }]);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const userId = auth.currentUser?.uid;
 
-  const get24HourTime = () => {
+  const toggleDay = (day: string) => {
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
+    );
+  };
+
+  const addTime = () => {
+    setTimes([...times, { hour: '09', minute: '00', period: 'AM' }]);
+  };
+
+  const removeTime = (index: number) => {
+    const newTimes = [...times];
+    newTimes.splice(index, 1);
+    setTimes(newTimes);
+  };
+
+  const updateTime = (index: number, key: 'hour' | 'minute' | 'period', value: string) => {
+    const newTimes = [...times];
+    newTimes[index][key] = value;
+    setTimes(newTimes);
+  };
+
+  const get24Hour = ({ hour, minute, period }: any) => {
     let hr = parseInt(hour);
     if (period === 'PM' && hr < 12) hr += 12;
     if (period === 'AM' && hr === 12) hr = 0;
-    return hr.toString().padStart(2, '0');
+    return `${hr.toString().padStart(2, '0')}:${minute}`;
   };
 
   useEffect(() => {
@@ -90,13 +111,16 @@ export default function AppointmentsScreen() {
       return;
     }
 
-    const hr24 = get24HourTime();
-    const baseTimeStr = `${hr24}:${minute}`;
     const base = { userId };
 
     try {
       if (formMode === 'appointment') {
-        const time = Timestamp.fromDate(new Date(`${selectedDate}T${baseTimeStr}`));
+        const hr = parseInt(times[0].hour);
+        const minute = times[0].minute;
+        const period = times[0].period;
+        const hr24 = period === 'PM' && hr < 12 ? hr + 12 : period === 'AM' && hr === 12 ? 0 : hr;
+        const time = Timestamp.fromDate(new Date(`${selectedDate}T${hr24.toString().padStart(2, '0')}:${minute}`));
+
         const data = {
           ...base,
           date: selectedDate,
@@ -127,14 +151,16 @@ export default function AppointmentsScreen() {
         const to = new Date(repeatTo || selectedDate);
 
         while (from <= to) {
-          const dateStr = from.toISOString().split('T')[0];
-          const time = Timestamp.fromDate(new Date(`${dateStr}T${baseTimeStr}`));
-          const entry = {
-            ...data,
-            date: dateStr,
-            time,
-          };
-          await addDoc(collection(db, 'medications'), entry);
+          const dayIdx = from.getDay().toString();
+          if (selectedDays.includes(dayIdx)) {
+            const dateStr = from.toISOString().split('T')[0];
+            for (const t of times) {
+              const timeStr = get24Hour(t);
+              const time = Timestamp.fromDate(new Date(`${dateStr}T${timeStr}`));
+              const entry = { ...data, date: dateStr, time };
+              await addDoc(collection(db, 'medications'), entry);
+            }
+          }
           from.setDate(from.getDate() + 1);
         }
       }
@@ -158,9 +184,8 @@ export default function AppointmentsScreen() {
     setFrequency('');
     setRepeatFrom('');
     setRepeatTo('');
-    setHour('09');
-    setMinute('00');
-    setPeriod('AM');
+    setSelectedDays([]);
+    setTimes([{ hour: '09', minute: '00', period: 'AM' }]);
     setEditingId(null);
   };
 
@@ -246,9 +271,13 @@ export default function AppointmentsScreen() {
                   setAgenda(item.agenda || '');
                   setLocation(item.location || '');
                   setWithPerson(item.meetingWith || '');
-                  setHour((item.time.getHours() % 12 || 12).toString().padStart(2, '0'));
-                  setMinute(item.time.getMinutes().toString().padStart(2, '0'));
-                  setPeriod(item.time.getHours() >= 12 ? 'PM' : 'AM');
+                  const time = item.time;
+                  const hr = time.getHours();
+                  setTimes([{
+                    hour: (hr % 12 || 12).toString().padStart(2, '0'),
+                    minute: time.getMinutes().toString().padStart(2, '0'),
+                    period: hr >= 12 ? 'PM' : 'AM'
+                  }]);
                   setFormMode('appointment');
                   setEditingId(item.id);
                 }}
@@ -310,6 +339,7 @@ export default function AppointmentsScreen() {
               <TextInput style={styles.input} placeholder="Agenda" value={agenda} onChangeText={setAgenda} />
               <TextInput style={styles.input} placeholder="Location" value={location} onChangeText={setLocation} />
               <TextInput style={styles.input} placeholder="Meeting With" value={withPerson} onChangeText={setWithPerson} />
+              
             </>
           ) : (
             <>
@@ -318,24 +348,51 @@ export default function AppointmentsScreen() {
               <TextInput style={styles.input} placeholder="Frequency" value={frequency} onChangeText={setFrequency} />
               <TextInput style={styles.input} placeholder="Repeat From (YYYY-MM-DD)" value={repeatFrom} onChangeText={setRepeatFrom} />
               <TextInput style={styles.input} placeholder="Repeat To (YYYY-MM-DD)" value={repeatTo} onChangeText={setRepeatTo} />
+
+              <Text style={{ marginTop: 10 }}>Repeat on:</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 }}>
+                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((label, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    onPress={() => toggleDay(idx.toString())}
+                    style={{
+                      padding: 8,
+                      backgroundColor: selectedDays.includes(idx.toString()) ? '#007AFF' : '#ccc',
+                      borderRadius: 6,
+                      margin: 2,
+                      width: 36,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <Text style={{ color: 'white' }}>{label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </>
           )}
 
-          <Text style={{ marginTop: 10 }}>Select Time:</Text>
-          <View style={styles.pickerRow}>
-            <Picker selectedValue={hour} style={styles.picker} onValueChange={setHour}>
-              {generatePickerItems(12)}
-            </Picker>
-            <Text style={styles.colon}>:</Text>
-            <Picker selectedValue={minute} style={styles.picker} onValueChange={setMinute}>
-              {generatePickerItems(60)}
-            </Picker>
-            <Picker selectedValue={period} style={[styles.picker, { width: 100 }]} onValueChange={setPeriod}>
-              <Picker.Item label="AM" value="AM" />
-              <Picker.Item label="PM" value="PM" />
-            </Picker>
-          </View>
-
+          <Text style={{ marginTop: 10 }}>Select Times:</Text>
+          {times.map((t, index) => (
+            <View key={index} style={styles.pickerRow}>
+              <Picker selectedValue={t.hour} style={styles.picker} onValueChange={(val) => updateTime(index, 'hour', val)}>
+                {generatePickerItems(12)}
+              </Picker>
+              <Text style={styles.colon}>:</Text>
+              <Picker selectedValue={t.minute} style={styles.picker} onValueChange={(val) => updateTime(index, 'minute', val)}>
+                {generatePickerItems(60)}
+              </Picker>
+              <Picker selectedValue={t.period} style={[styles.picker, { width: 100 }]} onValueChange={(val) => updateTime(index, 'period', val)}>
+                <Picker.Item label="AM" value="AM" />
+                <Picker.Item label="PM" value="PM" />
+              </Picker>
+              {times.length > 1 && (
+                <TouchableOpacity onPress={() => removeTime(index)}>
+                  <Text style={{ marginLeft: 6, color: 'red' }}>🗑</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+          <Button title="Add Time" onPress={addTime} />
           <Button title={editingId ? 'Update' : 'Save'} onPress={handleSave} />
         </View>
       )}
