@@ -131,11 +131,11 @@ export default function TabLayout() {
         }}
       >
         <Tabs.Screen
-          name="medications"
+          name="index"
           options={{
             title: '',
             tabBarIcon: ({ color }) => (
-              <IconSymbol size={28} name="pills.fill" color={color} />
+              <IconSymbol size={28} name="house.fill" color={color} />
             ),
           }}
         />
@@ -145,15 +145,6 @@ export default function TabLayout() {
             title: '',
             tabBarIcon: ({ color }) => (
               <IconSymbol size={28} name="calendar" color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="index"
-          options={{
-            title: '',
-            tabBarIcon: ({ color }) => (
-              <IconSymbol size={28} name="house.fill" color={color} />
             ),
           }}
         />
